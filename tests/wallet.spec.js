@@ -15,6 +15,36 @@ test("offers Phantom install when the extension is absent", async ({
   ).toHaveAttribute("href", "https://phantom.com/download");
 });
 
+test("opens a clearly labeled sample without connecting or requesting network data", async ({
+  page,
+}) => {
+  let rpcRequests = 0;
+  await page.route(
+    /https:\/\/api\.(mainnet|devnet)\.solana\.com\/?/,
+    async (route) => {
+      rpcRequests += 1;
+      await route.abort();
+    },
+  );
+  await page.goto("/");
+  await page.getByRole("button", { name: "Explore sample dashboard" }).click();
+  await expect(
+    page.getByText(/SAMPLE VIEW · Illustrative data only/),
+  ).toBeVisible();
+  await expect(page.locator(".balance-value")).toContainText("2.47812");
+  await expect(page.locator(".transaction-list .transaction")).toHaveCount(3);
+  await expect(
+    page.getByRole("link", { name: /View on Solana Explorer/ }),
+  ).toHaveCount(0);
+  await page.getByRole("radio", { name: "Devnet" }).check();
+  await expect(page.locator(".balance-value")).toContainText("0.83");
+  expect(rpcRequests).toBe(0);
+  await page.getByRole("button", { name: /Sample view.*Exit/ }).click();
+  await expect(
+    page.getByRole("heading", { name: /understand your wallet/i }),
+  ).toBeVisible();
+});
+
 test("reads a connected wallet and responds to network, account, and disconnect changes", async ({
   page,
 }) => {

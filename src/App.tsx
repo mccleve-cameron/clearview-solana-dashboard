@@ -57,6 +57,43 @@ interface WalletSnapshot {
   updatedAt: Date | null;
 }
 
+const SAMPLE_ADDRESS = "SampleWalletAddressNotConnected";
+
+function sampleSnapshot(key: string, network: Network): WalletSnapshot {
+  return {
+    key,
+    balance: network === "mainnet" ? 2.47812 : 0.83,
+    activity: [
+      {
+        signature: "SampleTransactionOne",
+        slot: 0,
+        err: null,
+        memo: null,
+        blockTime: null,
+        confirmationStatus: "confirmed",
+      },
+      {
+        signature: "SampleTransactionTwo",
+        slot: 0,
+        err: null,
+        memo: null,
+        blockTime: null,
+        confirmationStatus: "confirmed",
+      },
+      {
+        signature: "SampleTransactionThree",
+        slot: 0,
+        err: { sample: true },
+        memo: null,
+        blockTime: null,
+        confirmationStatus: "confirmed",
+      },
+    ],
+    error: "",
+    updatedAt: null,
+  };
+}
+
 function FlowGraphic() {
   return (
     <div
@@ -105,6 +142,7 @@ function App() {
     Boolean(getPhantomProvider()),
   );
   const [address, setAddress] = useState<string | null>(null);
+  const [sampleMode, setSampleMode] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState("");
   const [network, setNetwork] = useState<Network>("mainnet");
@@ -112,7 +150,11 @@ function App() {
   const [refreshCount, setRefreshCount] = useState(0);
   const [copied, setCopied] = useState(false);
   const queryKey = address ? address + ":" + network + ":" + refreshCount : "";
-  const current = snapshot?.key === queryKey ? snapshot : null;
+  const current = sampleMode
+    ? sampleSnapshot(queryKey, network)
+    : snapshot?.key === queryKey
+      ? snapshot
+      : null;
   const balance = current?.balance ?? null;
   const activity = current?.activity ?? [];
   const dataError = current?.error ?? "";
@@ -126,10 +168,12 @@ function App() {
     let active = true;
 
     const setPublicKey = (key?: PhantomPublicKey | null) => {
-      setAddress(key?.toString() || null);
+      if (!sampleMode) setAddress(key?.toString() || null);
       setConnectionError("");
     };
-    const clearPublicKey = () => setAddress(null);
+    const clearPublicKey = () => {
+      if (!sampleMode) setAddress(null);
+    };
     provider.on("connect", setPublicKey);
     provider.on("accountChanged", setPublicKey);
     provider.on("disconnect", clearPublicKey);
@@ -147,10 +191,10 @@ function App() {
       provider.removeListener?.("accountChanged", setPublicKey);
       provider.removeListener?.("disconnect", clearPublicKey);
     };
-  }, []);
+  }, [sampleMode]);
 
   useEffect(() => {
-    if (!address) return;
+    if (!address || sampleMode) return;
     const controller = new AbortController();
     Promise.all([
       getSolBalance(address, network, controller.signal),
@@ -180,7 +224,7 @@ function App() {
         });
       });
     return () => controller.abort();
-  }, [address, network, queryKey]);
+  }, [address, network, queryKey, sampleMode]);
 
   const connect = useCallback(async () => {
     const provider = getPhantomProvider();
@@ -192,6 +236,7 @@ function App() {
     setIsConnecting(true);
     try {
       const { publicKey } = await provider.connect();
+      setSampleMode(false);
       setAddress(publicKey.toString());
     } catch (error) {
       setConnectionError(
@@ -205,6 +250,12 @@ function App() {
   }, []);
 
   const disconnect = useCallback(async () => {
+    if (sampleMode) {
+      setSampleMode(false);
+      setAddress(null);
+      setSnapshot(null);
+      return;
+    }
     const provider = getPhantomProvider();
     if (!provider) return;
     try {
@@ -215,6 +266,14 @@ function App() {
         error instanceof Error ? error.message : "Could not disconnect wallet.",
       );
     }
+  }, [sampleMode]);
+
+  const showSample = useCallback(() => {
+    setSampleMode(true);
+    setAddress(SAMPLE_ADDRESS);
+    setNetwork("mainnet");
+    setConnectionError("");
+    setSnapshot(null);
   }, []);
 
   const copyAddress = useCallback(async () => {
@@ -274,10 +333,12 @@ function App() {
               <button
                 className="header-wallet"
                 onClick={disconnect}
-                title="Disconnect wallet"
+                title={sampleMode ? "Exit sample view" : "Disconnect wallet"}
               >
-                <span className="header-wallet-dot" /> {shorten(address, 4, 4)}{" "}
-                <span className="header-wallet-divider" /> Disconnect
+                <span className="header-wallet-dot" />{" "}
+                {sampleMode ? "Sample view" : shorten(address, 4, 4)}{" "}
+                <span className="header-wallet-divider" />{" "}
+                {sampleMode ? "Exit" : "Disconnect"}
               </button>
             ) : (
               connectAction
@@ -303,6 +364,13 @@ function App() {
                 </p>
                 <div className="intro-actions">
                   {connectAction}
+                  <button
+                    className="button button-secondary"
+                    onClick={showSample}
+                  >
+                    Explore sample dashboard{" "}
+                    <ArrowRight size={17} aria-hidden="true" />
+                  </button>
                   <span className="intro-note">
                     <LockKeyhole size={15} aria-hidden="true" /> Read-only. No
                     transactions or signatures.
@@ -370,16 +438,27 @@ function App() {
           </>
         ) : (
           <div className="dashboard">
+            {sampleMode && (
+              <p className="sample-banner" role="status">
+                SAMPLE VIEW · Illustrative data only. No wallet is connected and
+                no network requests are made.
+              </p>
+            )}
             <section className="dashboard-heading">
               <div>
                 <span className="eyebrow">
                   <span className="eyebrow-line" /> WALLET OVERVIEW
                 </span>
                 <h1>
-                  Your wallet, clearly<span className="accent-period">.</span>
+                  {sampleMode
+                    ? "A sample wallet, clearly"
+                    : "Your wallet, clearly"}
+                  <span className="accent-period">.</span>
                 </h1>
                 <p>
-                  Public on-chain information for your connected Solana address.
+                  {sampleMode
+                    ? "Explore the interface with illustrative data, then connect Phantom to read your own public address."
+                    : "Public on-chain information for your connected Solana address."}
                 </p>
               </div>
               <fieldset className="network-switch" aria-label="Solana network">
@@ -423,49 +502,70 @@ function App() {
                   <span>SOL</span>
                 </div>
                 <p>
-                  On{" "}
-                  {network === "mainnet" ? "Solana Mainnet" : "Solana Devnet"}.
+                  {sampleMode ? "Illustrative " : "On Solana "}
+                  {network === "mainnet" ? "Mainnet" : "Devnet"}
+                  {sampleMode ? " balance. " : ". "}
                   Token holdings are not included.
                 </p>
                 <div className="balance-bottom">
                   <span>
-                    {updatedAt
-                      ? "Updated " +
-                        dateLabel(Math.floor(updatedAt.getTime() / 1000))
-                      : "Waiting for network data"}
+                    {sampleMode
+                      ? "Illustrative balance"
+                      : updatedAt
+                        ? "Updated " +
+                          dateLabel(Math.floor(updatedAt.getTime() / 1000))
+                        : "Waiting for network data"}
                   </span>
-                  <button
-                    onClick={() => setRefreshCount((n) => n + 1)}
-                    disabled={isLoading}
-                    aria-label="Refresh wallet data"
-                  >
-                    <RefreshCw size={16} className={isLoading ? "spin" : ""} />
-                  </button>
+                  {!sampleMode && (
+                    <button
+                      onClick={() => setRefreshCount((n) => n + 1)}
+                      disabled={isLoading}
+                      aria-label="Refresh wallet data"
+                    >
+                      <RefreshCw
+                        size={16}
+                        className={isLoading ? "spin" : ""}
+                      />
+                    </button>
+                  )}
                 </div>
               </div>
               <div className="address-panel">
                 <div className="panel-topline">
-                  <span>CONNECTED ADDRESS</span>
+                  <span>
+                    {sampleMode ? "SAMPLE ADDRESS" : "CONNECTED ADDRESS"}
+                  </span>
                   <Fingerprint size={21} strokeWidth={1.5} aria-hidden="true" />
                 </div>
-                <div className="address-display" title={address}>
-                  {shorten(address, 9, 8)}
+                <div
+                  className="address-display"
+                  title={sampleMode ? undefined : address}
+                >
+                  {sampleMode ? "No wallet connected" : shorten(address, 9, 8)}
                 </div>
-                <p>Only your public address is shared with this dashboard.</p>
+                <p>
+                  {sampleMode
+                    ? "This is placeholder data; no wallet is connected."
+                    : "Only your public address is shared with this dashboard."}
+                </p>
                 <div className="address-actions">
-                  <button onClick={copyAddress}>
-                    <span>
-                      {copied ? <Check size={16} /> : <Copy size={16} />}
-                    </span>
-                    {copied ? "Copied" : "Copy address"}
-                  </button>
-                  <a
-                    href={addressExplorerUrl(address, network)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    View on Solana Explorer <ArrowUpRight size={16} />
-                  </a>
+                  {!sampleMode && (
+                    <>
+                      <button onClick={copyAddress}>
+                        <span>
+                          {copied ? <Check size={16} /> : <Copy size={16} />}
+                        </span>
+                        {copied ? "Copied" : "Copy address"}
+                      </button>
+                      <a
+                        href={addressExplorerUrl(address, network)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        View on Solana Explorer <ArrowUpRight size={16} />
+                      </a>
+                    </>
+                  )}
                 </div>
               </div>
             </section>
@@ -489,12 +589,19 @@ function App() {
             >
               <div className="section-heading">
                 <div>
-                  <span className="section-kicker">ON-CHAIN ACTIVITY</span>
+                  <span className="section-kicker">
+                    {sampleMode ? "SAMPLE ACTIVITY" : "ON-CHAIN ACTIVITY"}
+                  </span>
                   <h2 id="activity-title">Recent transactions</h2>
                 </div>
                 <span className="activity-network">
                   <span className="live-dot" />{" "}
-                  {network === "mainnet" ? "MAINNET" : "DEVNET"} · LAST 6
+                  {sampleMode
+                    ? "SAMPLE"
+                    : network === "mainnet"
+                      ? "MAINNET"
+                      : "DEVNET"}{" "}
+                  · {sampleMode ? "3 EXAMPLES" : "LAST 6"}
                 </span>
               </div>
               {isLoading ? (
@@ -518,62 +625,84 @@ function App() {
                 </div>
               ) : (
                 <div className="transaction-list">
-                  {activity.map((item) => (
-                    <a
-                      className="transaction"
-                      key={item.signature}
-                      href={explorerUrl(item.signature, network)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label={
-                        "View transaction " +
-                        item.signature +
-                        " on Solana Explorer"
-                      }
-                    >
-                      <span
-                        className={
-                          "transaction-icon " +
-                          (item.err ? "transaction-failed" : "")
-                        }
-                      >
-                        {item.err ? (
-                          <XCircle size={19} />
-                        ) : (
-                          <Activity size={19} />
-                        )}
-                      </span>
-                      <span className="transaction-main">
-                        <strong>
-                          {item.memo ? "Transaction with memo" : "Transaction"}
-                        </strong>
-                        <small>{shorten(item.signature, 8, 8)}</small>
-                      </span>
-                      <span className="transaction-meta">
+                  {activity.map((item) => {
+                    const content = (
+                      <>
                         <span
                           className={
-                            item.err ? "status-failed" : "status-success"
+                            "transaction-icon " +
+                            (item.err ? "transaction-failed" : "")
                           }
                         >
-                          {item.err ? "Failed" : "Confirmed"}
+                          {item.err ? (
+                            <XCircle size={19} />
+                          ) : (
+                            <Activity size={19} />
+                          )}
                         </span>
-                        <small>{dateLabel(item.blockTime)}</small>
-                      </span>
-                      <ArrowUpRight
-                        className="transaction-arrow"
-                        size={18}
-                        aria-hidden="true"
-                      />
-                    </a>
-                  ))}
+                        <span className="transaction-main">
+                          <strong>
+                            {item.memo
+                              ? "Transaction with memo"
+                              : "Transaction"}
+                          </strong>
+                          <small>
+                            {sampleMode
+                              ? "Illustrative example"
+                              : shorten(item.signature, 8, 8)}
+                          </small>
+                        </span>
+                        <span className="transaction-meta">
+                          <span
+                            className={
+                              item.err ? "status-failed" : "status-success"
+                            }
+                          >
+                            {item.err ? "Failed" : "Confirmed"}
+                          </span>
+                          <small>
+                            {sampleMode ? "Sample" : dateLabel(item.blockTime)}
+                          </small>
+                        </span>
+                        {!sampleMode && (
+                          <ArrowUpRight
+                            className="transaction-arrow"
+                            size={18}
+                            aria-hidden="true"
+                          />
+                        )}
+                      </>
+                    );
+                    return sampleMode ? (
+                      <div className="transaction" key={item.signature}>
+                        {content}
+                      </div>
+                    ) : (
+                      <a
+                        className="transaction"
+                        key={item.signature}
+                        href={explorerUrl(item.signature, network)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={
+                          "View transaction " +
+                          item.signature +
+                          " on Solana Explorer"
+                        }
+                      >
+                        {content}
+                      </a>
+                    );
+                  })}
                 </div>
               )}
             </section>
             <aside className="read-only-note">
               <ShieldCheck size={19} />
               <span>
-                This dashboard cannot send transactions. Connection grants
-                access to your public address only.
+                {sampleMode
+                  ? "Sample view uses illustrative data and makes no wallet or network request."
+                  : "This dashboard cannot send transactions. Connection grants access to your public address only."}
               </span>
             </aside>
           </div>
@@ -589,6 +718,13 @@ function App() {
         <span>
           Independent portfolio project · Built with React and TypeScript
         </span>
+        <a
+          href="https://cameron-mccleve-portfolio.mcclevage.chatgpt.site/work#clearview"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Read the case study <ArrowUpRight size={14} aria-hidden="true" />
+        </a>
         <span className="footer-safe">
           <CheckCircle2 size={14} /> READ-ONLY CONNECTION
         </span>

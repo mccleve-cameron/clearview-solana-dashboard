@@ -137,6 +137,15 @@
   background: var(--accent);
   color: #101b17;
 }
+.button-secondary {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--text);
+}
+.button-secondary:hover:not(:disabled) {
+  background: #24332f;
+  border-color: var(--accent);
+}
 .header-wallet {
   min-height: 44px;
   border: 1px solid var(--line);
@@ -445,6 +454,14 @@ h1 {
   color: var(--faint);
   font-size: 11px;
 }
+.site-footer a {
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
 .footer-brand {
   font-size: 13px;
   letter-spacing: -0.02em;
@@ -475,6 +492,14 @@ h1 {
 .dashboard {
   padding-top: 56px;
   padding-bottom: 60px;
+}
+.sample-banner {
+  border: 1px solid var(--accent);
+  background: #243329;
+  color: #e6f5ce;
+  padding: 13px 17px;
+  margin-bottom: 30px;
+  font: 500 12px/1.5 var(--mono);
 }
 .dashboard-heading {
   display: flex;
