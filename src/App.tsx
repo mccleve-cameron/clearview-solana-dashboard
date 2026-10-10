@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   Activity,
   ArrowRight,
@@ -34,7 +34,7 @@ function shorten(value: string, start = 6, end = 5): string {
 }
 
 function formatBalance(value: number): string {
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 6 }).format(
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 9 }).format(
     value,
   );
 }
@@ -143,6 +143,11 @@ function App() {
   );
   const [address, setAddress] = useState<string | null>(null);
   const [sampleMode, setSampleMode] = useState(false);
+  const [lookupMode, setLookupMode] = useState(false);
+  const [lookupInput, setLookupInput] = useState("");
+  const [lookupError, setLookupError] = useState("");
+  const [linkCopied, setLinkCopied] = useState(false);
+  const isMobileBrowser = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState("");
   const [network, setNetwork] = useState<Network>("mainnet");
@@ -162,17 +167,32 @@ function App() {
   const isLoading = Boolean(address) && current === null;
 
   useEffect(() => {
+    if (hasProvider) return;
+    const check = () => setHasProvider(Boolean(getPhantomProvider()));
+    const timers = [300, 1000, 2500].map((delay) =>
+      window.setTimeout(check, delay),
+    );
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      timers.forEach(window.clearTimeout);
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, [hasProvider]);
+
+  useEffect(() => {
     const provider = getPhantomProvider();
     if (!provider) return;
 
     let active = true;
 
     const setPublicKey = (key?: PhantomPublicKey | null) => {
-      if (!sampleMode) setAddress(key?.toString() || null);
+      if (!sampleMode && !lookupMode) setAddress(key?.toString() || null);
       setConnectionError("");
     };
     const clearPublicKey = () => {
-      if (!sampleMode) setAddress(null);
+      if (!sampleMode && !lookupMode) setAddress(null);
     };
     provider.on("connect", setPublicKey);
     provider.on("accountChanged", setPublicKey);
@@ -191,7 +211,7 @@ function App() {
       provider.removeListener?.("accountChanged", setPublicKey);
       provider.removeListener?.("disconnect", clearPublicKey);
     };
-  }, [sampleMode]);
+  }, [sampleMode, lookupMode, hasProvider]);
 
   useEffect(() => {
     if (!address || sampleMode) return;
@@ -237,6 +257,7 @@ function App() {
     try {
       const { publicKey } = await provider.connect();
       setSampleMode(false);
+      setLookupMode(false);
       setAddress(publicKey.toString());
     } catch (error) {
       setConnectionError(
@@ -250,8 +271,9 @@ function App() {
   }, []);
 
   const disconnect = useCallback(async () => {
-    if (sampleMode) {
+    if (sampleMode || lookupMode) {
       setSampleMode(false);
+      setLookupMode(false);
       setAddress(null);
       setSnapshot(null);
       return;
@@ -266,14 +288,40 @@ function App() {
         error instanceof Error ? error.message : "Could not disconnect wallet.",
       );
     }
-  }, [sampleMode]);
+  }, [sampleMode, lookupMode]);
 
   const showSample = useCallback(() => {
     setSampleMode(true);
+    setLookupMode(false);
     setAddress(SAMPLE_ADDRESS);
     setNetwork("mainnet");
     setConnectionError("");
     setSnapshot(null);
+  }, []);
+
+  const lookUpAddress = useCallback((event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const nextAddress = lookupInput.trim();
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(nextAddress)) {
+      setLookupError("Enter a Solana public address from Phantom (32–44 base58 characters).");
+      return;
+    }
+    setLookupError("");
+    setConnectionError("");
+    setSampleMode(false);
+    setLookupMode(true);
+    setAddress(nextAddress);
+    setSnapshot(null);
+  }, [lookupInput]);
+
+  const copySiteLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href.split("#")[0]);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 2500);
+    } catch {
+      setConnectionError("Copy unavailable. Use your browser's Share menu to copy this page's URL.");
+    }
   }, []);
 
   const copyAddress = useCallback(async () => {
@@ -290,7 +338,12 @@ function App() {
   }, [address]);
 
   const connectAction =
-    hasProvider === false ? (
+    hasProvider === false && isMobileBrowser ? (
+      <button className="button button-primary" onClick={copySiteLink}>
+        {linkCopied ? <Check size={17} aria-hidden="true" /> : <Copy size={17} aria-hidden="true" />}
+        {linkCopied ? "Link copied" : "Copy link for Phantom"}
+      </button>
+    ) : hasProvider === false ? (
       <a
         className="button button-primary"
         href="https://phantom.com/download"
@@ -333,16 +386,16 @@ function App() {
               <button
                 className="header-wallet"
                 onClick={disconnect}
-                title={sampleMode ? "Exit sample view" : "Disconnect wallet"}
+                title={sampleMode ? "Exit sample view" : lookupMode ? "Change address" : "Disconnect wallet"}
               >
                 <span className="header-wallet-dot" />{" "}
-                {sampleMode ? "Sample view" : shorten(address, 4, 4)}{" "}
+                {sampleMode ? "Sample view" : lookupMode ? "Live lookup" : shorten(address, 4, 4)}{" "}
                 <span className="header-wallet-divider" />{" "}
-                {sampleMode ? "Exit" : "Disconnect"}
+                {sampleMode || lookupMode ? "Exit" : "Disconnect"}
               </button>
-            ) : (
+            ) : hasProvider || !isMobileBrowser ? (
               connectAction
-            )}
+            ) : null}
           </div>
         </div>
       </header>
@@ -359,29 +412,35 @@ function App() {
                   <span className="accent-period">.</span>
                 </h1>
                 <p className="intro-description">
-                  Connect Phantom to see your SOL balance and recent on-chain
-                  activity in one calm, readable place.
+                  See a live SOL balance and recent on-chain activity. Connect
+                  Phantom or look up any public Solana address.
                 </p>
                 <div className="intro-actions">
                   {connectAction}
-                  <button
-                    className="button button-secondary"
-                    onClick={showSample}
-                  >
-                    Explore sample dashboard{" "}
-                    <ArrowRight size={17} aria-hidden="true" />
-                  </button>
                   <span className="intro-note">
                     <LockKeyhole size={15} aria-hidden="true" /> Read-only. No
                     transactions or signatures.
                   </span>
                 </div>
-                {hasProvider === false && (
-                  <p className="helper-message">
-                    Install the Phantom browser extension, then refresh this
-                    page to connect.
-                  </p>
+                {hasProvider === false && isMobileBrowser && (
+                  <div className="mobile-help" role="note">
+                    <strong>Using the Phantom iPhone app?</strong>
+                    <p>Tap the copy button, open Phantom, use its Explore/search bar to paste this URL, then tap Connect Phantom here. Wallet connection only works inside Phantom's browser on mobile.</p>
+                  </div>
                 )}
+                {hasProvider === false && !isMobileBrowser && (
+                  <p className="helper-message">For wallet connection on desktop, install the Phantom browser extension and reopen this page.</p>
+                )}
+                <form className="lookup-form" onSubmit={lookUpAddress}>
+                  <label htmlFor="public-address">OR LOOK UP LIVE DATA WITHOUT CONNECTING</label>
+                  <div className="lookup-fields">
+                    <input id="public-address" value={lookupInput} onChange={(event) => setLookupInput(event.target.value)} placeholder="Paste a Solana public address" autoComplete="off" spellCheck={false} aria-describedby="lookup-help" />
+                    <button className="button button-secondary" type="submit">View live data <ArrowRight size={17} aria-hidden="true" /></button>
+                  </div>
+                  <p id="lookup-help">In Phantom, copy your Solana account's public address. Never enter a recovery phrase or private key.</p>
+                  {lookupError && <p className="lookup-error" role="alert">{lookupError}</p>}
+                </form>
+                <button className="sample-link" onClick={showSample}>Explore the illustrative sample instead <ArrowRight size={15} aria-hidden="true" /></button>
                 {connectionError && (
                   <p className="message message-error" role="alert">
                     <CircleAlert size={16} /> {connectionError}
@@ -393,7 +452,7 @@ function App() {
             <section className="value-strip" aria-label="How Clearview works">
               <div>
                 <span className="strip-number">01</span>
-                <span>Connect your Phantom wallet</span>
+                <span>Connect or enter a public address</span>
               </div>
               <ArrowRight
                 className="strip-arrow"
@@ -452,13 +511,13 @@ function App() {
                 <h1>
                   {sampleMode
                     ? "A sample wallet, clearly"
-                    : "Your wallet, clearly"}
+                    : lookupMode ? "A live address, clearly" : "Your wallet, clearly"}
                   <span className="accent-period">.</span>
                 </h1>
                 <p>
                   {sampleMode
                     ? "Explore the interface with illustrative data, then connect Phantom to read your own public address."
-                    : "Public on-chain information for your connected Solana address."}
+                    : lookupMode ? "Live public on-chain information. This address is being viewed, not connected to Phantom." : "Public on-chain information for your connected Solana address."}
                 </p>
               </div>
               <fieldset className="network-switch" aria-label="Solana network">
@@ -533,7 +592,7 @@ function App() {
               <div className="address-panel">
                 <div className="panel-topline">
                   <span>
-                    {sampleMode ? "SAMPLE ADDRESS" : "CONNECTED ADDRESS"}
+                    {sampleMode ? "SAMPLE ADDRESS" : lookupMode ? "PUBLIC ADDRESS LOOKUP" : "CONNECTED ADDRESS"}
                   </span>
                   <Fingerprint size={21} strokeWidth={1.5} aria-hidden="true" />
                 </div>
@@ -546,7 +605,7 @@ function App() {
                 <p>
                   {sampleMode
                     ? "This is placeholder data; no wallet is connected."
-                    : "Only your public address is shared with this dashboard."}
+                    : lookupMode ? "Read-only lookup. No wallet connection or ownership verification." : "Only your public address is shared with this dashboard."}
                 </p>
                 <div className="address-actions">
                   {!sampleMode && (
@@ -702,7 +761,7 @@ function App() {
               <span>
                 {sampleMode
                   ? "Sample view uses illustrative data and makes no wallet or network request."
-                  : "This dashboard cannot send transactions. Connection grants access to your public address only."}
+                  : lookupMode ? "Live data from Solana's public RPC. This lookup never connects a wallet or requests a signature." : "This dashboard cannot send transactions. Connection grants access to your public address only."}
               </span>
             </aside>
           </div>

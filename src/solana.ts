@@ -10,7 +10,7 @@ export interface SignatureInfo {
 }
 
 const ENDPOINTS: Record<Network, string> = {
-  mainnet: "https://api.mainnet.solana.com",
+  mainnet: "https://solana-rpc.publicnode.com",
   devnet: "https://api.devnet.solana.com",
 };
 

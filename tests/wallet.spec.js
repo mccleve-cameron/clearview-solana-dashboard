@@ -20,14 +20,14 @@ test("opens a clearly labeled sample without connecting or requesting network da
 }) => {
   let rpcRequests = 0;
   await page.route(
-    /https:\/\/api\.(mainnet|devnet)\.solana\.com\/?/,
+    /https:\/\/(solana-rpc\.publicnode\.com|api\.devnet\.solana\.com)\/?/,
     async (route) => {
       rpcRequests += 1;
       await route.abort();
     },
   );
   await page.goto("/");
-  await page.getByRole("button", { name: "Explore sample dashboard" }).click();
+  await page.getByRole("button", { name: /Explore the illustrative sample/ }).click();
   await expect(
     page.getByText(/SAMPLE VIEW · Illustrative data only/),
   ).toBeVisible();
@@ -43,6 +43,58 @@ test("opens a clearly labeled sample without connecting or requesting network da
   await expect(
     page.getByRole("heading", { name: /understand your wallet/i }),
   ).toBeVisible();
+});
+
+test("shows iPhone users how to connect through Phantom's browser", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() =>
+    Object.defineProperty(navigator, "userAgent", {
+      value: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)",
+      configurable: true,
+    }),
+  );
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Copy link for Phantom" }).first()).toBeVisible();
+  await expect(page.getByText(/Wallet connection only works inside Phantom's browser on mobile/)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: "test-results/iphone-connection-guide.png", fullPage: true });
+});
+
+test("looks up real public address data without a wallet connection", async ({
+  page,
+}) => {
+  let rpcRequests = 0;
+  await page.route(/https:\/\/(solana-rpc\.publicnode\.com|api\.devnet\.solana\.com)\/?/, async (route) => {
+    rpcRequests += 1;
+    const request = route.request().postDataJSON();
+    expect(request.params[0]).toBe(secondAddress);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "access-control-allow-origin": "*" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        result: request.method === "getBalance"
+          ? { context: { slot: 1 }, value: 3_250_000_000 }
+          : [{ signature: "B".repeat(88), slot: 2, err: null, memo: null, blockTime: 1_700_000_000, confirmationStatus: "confirmed" }],
+      }),
+    });
+  });
+  await page.goto("/");
+  await page.getByLabel("OR LOOK UP LIVE DATA WITHOUT CONNECTING").fill("invalid");
+  await page.getByRole("button", { name: /View live data/ }).click();
+  await expect(page.getByRole("alert")).toContainText("Enter a Solana public address");
+  expect(rpcRequests).toBe(0);
+  await page.getByLabel("OR LOOK UP LIVE DATA WITHOUT CONNECTING").fill(secondAddress);
+  await page.getByRole("button", { name: /View live data/ }).click();
+  await expect(page.getByRole("heading", { name: /A live address, clearly/ })).toBeVisible();
+  await expect(page.locator(".balance-value")).toContainText("3.25");
+  await expect(page.locator(".transaction-list .transaction")).toHaveCount(1);
+  await expect(page.getByText(/No wallet connection or ownership verification/)).toBeVisible();
+  expect(rpcRequests).toBe(2);
 });
 
 test("reads a connected wallet and responds to network, account, and disconnect changes", async ({
@@ -79,7 +131,7 @@ test("reads a connected wallet and responds to network, account, and disconnect 
   }, firstAddress);
 
   await page.route(
-    /https:\/\/api\.(mainnet|devnet)\.solana\.com\/?/,
+    /https:\/\/(solana-rpc\.publicnode\.com|api\.devnet\.solana\.com)\/?/,
     async (route) => {
       if (route.request().method() === "OPTIONS") {
         await route.fulfill({
